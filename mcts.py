@@ -11,6 +11,8 @@ class MCTSNode:
         self.children = {}
         self.visits = 0
         self.value = 0.0
+        
+
 
 class MCTS:
     def __init__(self, model, board_size=15, c_puct=1.0, n_simulations=100):
@@ -18,6 +20,7 @@ class MCTS:
         self.board_size = board_size
         self.c_puct = c_puct
         self.n_simulations = n_simulations
+        self.device = next(model.parameters()).device
 
     def search(self, root_state):
         root = MCTSNode(root_state)
@@ -73,7 +76,7 @@ class MCTS:
 
     def evaluate(self, state):
         input_state = self.encode_state(state)
-        input_tensor = torch.FloatTensor(input_state).unsqueeze(0)
+        input_tensor = torch.FloatTensor(input_state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             _, value = self.model(input_tensor)
         return value.item()

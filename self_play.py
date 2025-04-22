@@ -3,30 +3,17 @@ import numpy as np
 import torch
 from replay_buffer import ReplayBuffer
 from mcts import MCTS
-from network import YourModelClass
 
 BOARD_SIZE = 15
 
-def self_play_games():
+def self_play_games(model, num_games=100, save_path='self_play_data.pkl'):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = YourModelClass().to(device)
-    #model.load_state_dict(torch.load('best_model.pth', map_location=device))
-    #model.eval()
-
-    import os
-    if os.path.exists('best_model.pth'):
-        model.load_state_dict(torch.load('best_model.pth', map_location=device))
-        print("✅ 加载已有模型 best_model.pth")
-    else:
-        print("⚡ 未找到 best_model.pth，使用随机初始化的模型开始自我对弈")
+    model.to(device)
     model.eval()
 
-
-
-    mcts = MCTS(model, board_size=BOARD_SIZE, n_simulations=100)
+    mcts = MCTS(model, board_size=BOARD_SIZE, n_simulations=50)
     buffer = ReplayBuffer()
 
-    num_games = 500  # 玩500局
     for _ in range(num_games):
         board = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=int)
         history = []
@@ -38,7 +25,7 @@ def self_play_games():
             y, x = divmod(action, BOARD_SIZE)
 
             if board[y][x] != 0:
-                continue  # 确保合法
+                continue
 
             board[y][x] = player
             state = encode_board(board, player)
@@ -49,15 +36,14 @@ def self_play_games():
                 break
             player = -player
         else:
-            winner = 0  # 平局
+            winner = 0
 
-        # 把历史数据放入buffer
         for state, policy, p in history:
             value = 1 if p == winner else -1 if winner != 0 else 0
             buffer.add(state, policy, value)
 
-    buffer.save('self_play_data.pkl')
-    print(f"自我对弈完成，保存数据，大小: {len(buffer.buffer)}")
+    buffer.save(save_path)
+    print(f"✅ 自我对弈完成，保存到 {save_path}，大小: {len(buffer.buffer)}")
 
 def encode_board(board, current_player):
     black = (board == 1).astype(np.float32)

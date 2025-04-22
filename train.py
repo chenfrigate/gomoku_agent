@@ -12,7 +12,8 @@ def train_agent(model, epochs=10, batch_size=64, data_path='self_play_data.pkl')
     buffer.load(data_path)
     data = buffer.sample(len(buffer.buffer))  # 全量采样
 
-    states, policies, values = zip(*data)
+    states, policies, values, *_ = zip(*data)
+    print("Sample of extra elements in data:", _[:10])  # Print first 10 extra elements
     states = torch.FloatTensor(states).to(device)
     policies = torch.FloatTensor(policies).to(device)
     values = torch.FloatTensor(values).unsqueeze(1).to(device)

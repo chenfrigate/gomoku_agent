@@ -10,8 +10,18 @@ BOARD_SIZE = 15
 def self_play_games():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = YourModelClass().to(device)
-    model.load_state_dict(torch.load('best_model.pth', map_location=device))
+    #model.load_state_dict(torch.load('best_model.pth', map_location=device))
+    #model.eval()
+
+    import os
+    if os.path.exists('best_model.pth'):
+        model.load_state_dict(torch.load('best_model.pth', map_location=device))
+        print("✅ 加载已有模型 best_model.pth")
+    else:
+        print("⚡ 未找到 best_model.pth，使用随机初始化的模型开始自我对弈")
     model.eval()
+
+
 
     mcts = MCTS(model, board_size=BOARD_SIZE, n_simulations=50)
     buffer = ReplayBuffer()

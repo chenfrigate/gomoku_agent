@@ -1,5 +1,7 @@
-import pickle
 import random
+import pickle
+import numpy as np
+import torch
 
 class ReplayBuffer:
     def __init__(self, capacity=10000):
@@ -14,9 +16,11 @@ class ReplayBuffer:
     def sample(self, batch_size):
         samples = random.sample(self.buffer, batch_size)
         states, policies, values = zip(*samples)
-        states = torch.tensor(np.array(states), dtype=torch.float32)  # ⭐新增
-        policies = torch.tensor(np.array(policies), dtype=torch.float32)  # ⭐新增
-        values = torch.tensor(np.array(values), dtype=torch.float32).unsqueeze(1)  # ⭐新增
+
+        states = torch.tensor(np.stack(states), dtype=torch.float32)  # (batch_size, 1, 15, 15)
+        policies = torch.tensor(np.array(policies), dtype=torch.float32)  # (batch_size, action_size)
+        values = torch.tensor(np.array(values), dtype=torch.float32).unsqueeze(1)  # (batch_size, 1)
+
         return states, policies, values
 
     def save(self, filename):

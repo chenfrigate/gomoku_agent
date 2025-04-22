@@ -24,12 +24,17 @@ def self_play_games(model, num_games=100, save_path='self_play_data.pkl'):
             action = np.random.choice(len(policy), p=policy)
             y, x = divmod(action, BOARD_SIZE)
 
-            if board[y][x] != 0:
-                continue
+            #if board[y][x] != 0:
+            #    continue
+
+            while board[y][x] != 0:
+                action = np.random.choice(len(policy), p=policy)
+                y, x = divmod(action, BOARD_SIZE)
+
 
             board[y][x] = player
             state = encode_board(board, player)
-            state = np.expand_dims(state, axis=0)  # (15,15) -> (1,15,15)
+            #state = np.expand_dims(state, axis=0)  # (15,15) -> (1,15,15)
             history.append((state, policy, player))
 
             if check_winner(board, x, y, player):

@@ -14,6 +14,9 @@ class ReplayBuffer:
     def sample(self, batch_size):
         samples = random.sample(self.buffer, batch_size)
         states, policies, values = zip(*samples)
+        states = torch.tensor(np.array(states), dtype=torch.float32)  # ⭐新增
+        policies = torch.tensor(np.array(policies), dtype=torch.float32)  # ⭐新增
+        values = torch.tensor(np.array(values), dtype=torch.float32).unsqueeze(1)  # ⭐新增
         return states, policies, values
 
     def save(self, filename):

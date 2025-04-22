@@ -29,6 +29,7 @@ def self_play_games(model, num_games=100, save_path='self_play_data.pkl'):
 
             board[y][x] = player
             state = encode_board(board, player)
+            state = np.expand_dims(state, axis=0)  # (15,15) -> (1,15,15)
             history.append((state, policy, player))
 
             if check_winner(board, x, y, player):

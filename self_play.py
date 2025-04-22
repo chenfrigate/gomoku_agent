@@ -1,47 +1,51 @@
+# self_play.py
 import numpy as np
+import torch
 from replay_buffer import ReplayBuffer
+from mcts import MCTS
+from network import YourModelClass
 
 BOARD_SIZE = 15
 
 def self_play_games():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = YourModelClass().to(device)
+    model.load_state_dict(torch.load('best_model.pth', map_location=device))
+    model.eval()
+
+    mcts = MCTS(model, board_size=BOARD_SIZE, n_simulations=50)
     buffer = ReplayBuffer()
 
     num_games = 5  # 玩5局
     for _ in range(num_games):
         board = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=int)
-        player = 1
         history = []
+        player = 1
 
         for move in range(BOARD_SIZE * BOARD_SIZE):
-            # 随机选择一个合法动作
-            empty = np.argwhere(board == 0)
-            if len(empty) == 0:
-                break
-            action = empty[np.random.choice(len(empty))]
-            y, x = action
+            policy = mcts.search(board)
+            action = np.random.choice(len(policy), p=policy)
+            y, x = divmod(action, BOARD_SIZE)
+
+            if board[y][x] != 0:
+                continue  # 确保合法
 
             board[y][x] = player
-
-            # 记录当前状态（复制），动作（one-hot），当前玩家
             state = encode_board(board, player)
-            policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
-            policy[y * BOARD_SIZE + x] = 1.0  # 当前选的动作
-
             history.append((state, policy, player))
 
             if check_winner(board, x, y, player):
                 winner = player
                 break
-            player = -player  # 切换玩家
+            player = -player
         else:
             winner = 0  # 平局
 
-        # 保存到buffer
-        for state, policy, player in history:
-            value = 1 if player == winner else -1 if winner != 0 else 0
+        # 把历史数据放入buffer
+        for state, policy, p in history:
+            value = 1 if p == winner else -1 if winner != 0 else 0
             buffer.add(state, policy, value)
 
-    # 保存数据
     buffer.save('self_play_data.pkl')
     print(f"自我对弈完成，保存数据，大小: {len(buffer.buffer)}")
 

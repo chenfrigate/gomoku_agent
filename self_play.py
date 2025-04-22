@@ -23,10 +23,10 @@ def self_play_games():
 
 
 
-    mcts = MCTS(model, board_size=BOARD_SIZE, n_simulations=50)
+    mcts = MCTS(model, board_size=BOARD_SIZE, n_simulations=100)
     buffer = ReplayBuffer()
 
-    num_games = 5  # 玩5局
+    num_games = 500  # 玩500局
     for _ in range(num_games):
         board = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=int)
         history = []

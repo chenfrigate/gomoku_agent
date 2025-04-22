@@ -18,7 +18,7 @@ def train_agent():
     buffer.load('self_play_data.pkl')
 
     batch_size = 64
-    epochs = 10
+    epochs = 50
 
     for epoch in range(epochs):
         model.train()

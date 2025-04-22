@@ -24,7 +24,7 @@ class GomokuGame:
 
         self.model = model
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.mcts = MCTS(self.model, board_size=BOARD_SIZE, n_simulations=50)
+        self.mcts = MCTS(self.model, board_size=BOARD_SIZE, n_simulations=100)
 
         self.draw_board()
 

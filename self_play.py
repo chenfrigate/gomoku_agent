@@ -4,7 +4,7 @@ import random
 import numpy as np
 
 from mcts import MCTS
-from gomoku_game import GomokuGame
+from gomoku_game_headless import GomokuGame
 from replay_buffer import ReplayBuffer
 from network import encode_pov_tensor
 

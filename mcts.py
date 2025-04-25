@@ -1,4 +1,3 @@
-# mcts.py
 import math
 import numpy as np
 import copy
@@ -6,27 +5,27 @@ import torch
 
 class MCTSNode:
     def __init__(self, state, parent=None):
-        self.state = state
-        self.parent = parent
-        self.children = {}
-        self.visits = 0
-        self.value = 0.0
-        
-
+        self.state   = state
+        self.parent  = parent
+        self.children= {}
+        self.visits  = 0
+        self.value   = 0.0
+        self.prior   = 0.0  # network policy prior
 
 class MCTS:
     def __init__(self, model, board_size=15, c_puct=1.0, n_simulations=100):
-        self.model = model
-        self.board_size = board_size
-        self.c_puct = c_puct
+        self.model         = model
+        self.board_size    = board_size
+        self.c_puct        = c_puct
         self.n_simulations = n_simulations
-        self.device = next(model.parameters()).device
+        # assume model.parameters() is non-empty
+        self.device        = next(model.parameters()).device
 
     def search(self, root_state):
         root = MCTSNode(root_state)
 
         for _ in range(self.n_simulations):
-            node = root
+            node  = root
             state = copy.deepcopy(root_state)
 
             # Selection
@@ -48,40 +47,66 @@ class MCTS:
         return self.get_policy(root)
 
     def select(self, node):
-        best_score = -float('inf')
+        """
+        PUCT selection: Q + U, where U = c_puct * P * sqrt(N_parent) / (1 + N_child)
+        """
+        best_score  = -float('inf')
         best_action = None
-        best_child = None
+        best_child  = None
 
         for action, child in node.children.items():
             q = child.value / (child.visits + 1e-8)
-            u = self.c_puct * math.sqrt(node.visits + 1) / (1 + child.visits)
+            u = self.c_puct * child.prior * math.sqrt(node.visits) / (1 + child.visits)
             score = q + u
             if score > best_score:
-                best_score = score
+                best_score  = score
                 best_action = action
-                best_child = child
+                best_child  = child
         return best_action, best_child
 
     def expand(self, node, state):
+        """
+        Expand node with network policy priors.
+        """
+        # 1) network forward to get policy over moves
+        input_state  = self.encode_state(state)
+        input_tensor = torch.FloatTensor(input_state).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            policy, _ = self.model(input_tensor)
+        policy = policy.cpu().numpy().flatten()
+
+        # 2) create children with priors
         legal_moves = self.get_legal_moves(state)
         for move in legal_moves:
-            node.children[move] = MCTSNode(copy.deepcopy(state), parent=node)
+            child = MCTSNode(copy.deepcopy(state), parent=node)
+            # assign a minimal prior if network gives zero
+            child.prior = max(policy[move], 1e-6)
+            node.children[move] = child
 
     def backpropagate(self, node, value):
+        """
+        Propagate evaluation up the tree, alternating sign.
+        """
         while node:
             node.visits += 1
-            node.value += value
-            node = node.parent
-            value = -value
+            node.value  += value
+            node       = node.parent
+            value      = -value
 
     def evaluate(self, state):
-        input_state = self.encode_state(state)
+        """
+        Use value head of network to evaluate state.
+        """
+        input_state  = self.encode_state(state)
         input_tensor = torch.FloatTensor(input_state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             _, value = self.model(input_tensor)
         return value.item()
 
     def get_policy(self, root):
+        """
+        Return visit-count normalized policy from root children.
+        """
         visits = np.zeros(self.board_size * self.board_size)
         for action, child in root.children.items():
             visits[action] = child.visits
@@ -89,6 +114,9 @@ class MCTS:
         return policy
 
     def encode_state(self, board):
+        """
+        Convert board to 3 x H x W tensor: black, white, empty.
+        """
         black = (board == 1).astype(np.float32)
         white = (board == -1).astype(np.float32)
         empty = (board == 0).astype(np.float32)

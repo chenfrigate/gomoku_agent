@@ -1,78 +1,146 @@
-# self_play.py
+import os
+import pickle
+import random
 import numpy as np
-import torch
-from replay_buffer import ReplayBuffer
+
 from mcts import MCTS
+from gomoku_game import GomokuGame
+from replay_buffer import ReplayBuffer
+from network import encode_pov_tensor
 
-BOARD_SIZE = 15
+# —— 动态给 GomokuGame 添加无头自对弈所需接口 ——
 
-def self_play_games(model, num_games=100, save_path='self_play_data.pkl'):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    model.eval()
+def get_board(self):
+    return self.board
+GomokuGame.get_board = get_board
 
-    mcts = MCTS(model, board_size=BOARD_SIZE, n_simulations=50)
-    buffer = ReplayBuffer()
+def get_state_tensor(self, player):
+    return encode_pov_tensor(self.board, player)
+GomokuGame.get_state_tensor = get_state_tensor
 
-    for _ in range(num_games):
-        board = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=int)
-        history = []
-        player = 1
+def get_legal_moves(self, board):
+    return list(np.where(board.flatten() == 0)[0])
+GomokuGame.get_legal_moves = get_legal_moves
 
-        for move in range(BOARD_SIZE * BOARD_SIZE):
-            policy = mcts.search(board)
-            action = np.random.choice(len(policy), p=policy)
-            y, x = divmod(action, BOARD_SIZE)
+def play(self, action, player):
+    size = self.board.shape[0]
+    y, x = divmod(action, size)
+    self.board[y][x] = player
+GomokuGame.play = play
 
-            #if board[y][x] != 0:
-            #    continue
+def get_winner(self):
+    H, W = self.board.shape
+    for y in range(H):
+        for x in range(W):
+            p = self.board[y][x]
+            if p != 0 and self.check_winner(x, y, p):
+                return p
+    return 0
+GomokuGame.get_winner = get_winner
 
-            while board[y][x] != 0:
-                action = np.random.choice(len(policy), p=policy)
-                y, x = divmod(action, BOARD_SIZE)
+def is_over(self):
+    return (self.get_winner() != 0) or np.all(self.board.flatten() != 0)
+GomokuGame.is_over = is_over
 
 
-            board[y][x] = player
-            state = encode_board(board, player)
-            #state = np.expand_dims(state, axis=0)  # (15,15) -> (1,15,15)
-            history.append((state, policy, player))
+def self_play_games(
+    model_black=None,
+    model_white=None,
+    num_games=100,
+    save_path="self_play_data.pkl",
+    cycle_index=None,
+    num_simulations=200,
+    buffer_size=10000
+):
+    """
+    进行自对弈，支持两模型对抗或随机走子。
 
-            if check_winner(board, x, y, player):
-                winner = player
-                break
-            player = -player
-        else:
-            winner = 0
+    Args:
+        model_black:      黑方模型，None 时随机走子
+        model_white:      白方模型，None 时退到 model_black 或随机
+        num_games:        对局数
+        save_path:        保存路径（.pkl）
+        cycle_index:      当前 Cycle 索引，仅用于打印
+        num_simulations:  每步 MCTS 模拟次数
+        buffer_size:      ReplayBuffer 容量
+    """
+    if model_white is None:
+        model_white = model_black
 
-        for state, policy, p in history:
-            value = 1 if p == winner else -1 if winner != 0 else 0
-            buffer.add(state, policy, value)
+    save_dir = os.path.dirname(save_path)
+    if save_dir and not os.path.exists(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
 
-    buffer.save(save_path)
-    print(f"✅ 自我对弈完成，保存到 {save_path}，大小: {len(buffer.buffer)}")
+    buffer = ReplayBuffer(capacity=buffer_size)
 
-def encode_board(board, current_player):
-    black = (board == 1).astype(np.float32)
-    white = (board == -1).astype(np.float32)
-    empty = (board == 0).astype(np.float32)
-    if current_player == 1:
-        return np.stack([black, white, empty], axis=0)
-    else:
-        return np.stack([white, black, empty], axis=0)
+    for idx in range(1, num_games + 1):
+        game = GomokuGame()
+        board = game.get_board()
+        size  = board.shape[0]
 
-def check_winner(board, x, y, player):
-    directions = [(1,0), (0,1), (1,1), (1,-1)]
-    for dx, dy in directions:
-        count = 1
-        for d in [1, -1]:
-            nx, ny = x, y
-            while True:
-                nx += d * dx
-                ny += d * dy
-                if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE and board[ny][nx] == player:
-                    count += 1
+        mcts_black = MCTS(model_black, board_size=size, n_simulations=num_simulations) if model_black else None
+        mcts_white = MCTS(model_white, board_size=size, n_simulations=num_simulations) if model_white else None
+
+        state_hist  = []
+        pi_hist     = []
+        player_hist = []
+        current     = 1  # 黑方 +1，白方 -1
+
+        while not game.is_over():
+            if current == 1:
+                if mcts_black:
+                    policy = mcts_black.search(game.get_board())
                 else:
-                    break
-        if count >= 5:
-            return True
-    return False
+                    legal = game.get_legal_moves(game.get_board())
+                    policy = np.zeros(size*size)
+                    for a in legal:
+                        policy[a] = 1/len(legal)
+                legal = game.get_legal_moves(game.get_board())
+                probs = policy[legal]
+                if probs.sum() <= 0:
+                    action = random.choice(legal)
+                    pi = [1/len(legal)] * len(legal)
+                else:
+                    probs = probs / probs.sum()
+                    action = np.random.choice(legal, p=probs)
+                    pi = probs.tolist()
+            else:
+                if mcts_white:
+                    policy = mcts_white.search(game.get_board())
+                else:
+                    legal = game.get_legal_moves(game.get_board())
+                    policy = np.zeros(size*size)
+                    for a in legal:
+                        policy[a] = 1/len(legal)
+                legal = game.get_legal_moves(game.get_board())
+                probs = policy[legal]
+                if probs.sum() <= 0:
+                    action = random.choice(legal)
+                    pi = [1/len(legal)] * len(legal)
+                else:
+                    probs = probs / probs.sum()
+                    action = np.random.choice(legal, p=probs)
+                    pi = probs.tolist()
+
+            state = game.get_state_tensor(current)
+            state_hist.append(state)
+            pi_hist.append(pi)
+            player_hist.append(current)
+
+            game.play(action, current)
+            current *= -1
+
+        winner = game.get_winner()
+        # 将每一步 (state, pi, value) 插入 buffer
+        for st, pi_vec, pl in zip(state_hist, pi_hist, player_hist):
+            value = winner * pl
+            buffer.add(st, pi_vec, value)
+
+        if idx % 1 == 0 or idx == num_games:
+            print(f"[SelfPlay] Cycle {cycle_index} game {idx}/{num_games} finished. Winner: {winner}")
+
+
+
+    with open(save_path, 'wb') as f:
+        pickle.dump(buffer, f)
+    print(f"[SelfPlay] Saved {num_games} games to {save_path}")

@@ -20,8 +20,8 @@ def train_agent(
       - device:      torch.device('cuda') or torch.device('cpu')
     """
     # 1. 准备设备
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     model.to(device)
 
     # 2. 加载数据

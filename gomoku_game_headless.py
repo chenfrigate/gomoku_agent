@@ -29,7 +29,7 @@ class GomokuGame:
 
         self.board[x][y] = self.current_player
 
-        if self.check_win(x, y):
+        if self.check_win(x, y,self.current_player):
             self.game_over = True
             self.winner = self.current_player
         elif len(self.get_legal_actions()) == 0:

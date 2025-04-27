@@ -102,8 +102,7 @@ def self_play_games(
             value = winner * pl
             buffer.add(st, pi_vec, value)
 
-        if idx % 1 == 0 or idx == num_games:
-            print(f"[SelfPlay] Cycle {cycle_index} game {idx}/{num_games} finished. Winner: {winner}")
+        print(f"[SelfPlay] Cycle {cycle_index} game {idx}/{num_games} finished. Winner: {winner}")
 
     # 保存 ReplayBuffer 对象
     with open(save_path, 'wb') as f:
@@ -112,7 +111,6 @@ def self_play_games(
 
 
 if __name__ == "__main__":
-    # 示例调用：python self_play.py 100 models/pretrained.pth self_play_data.pkl
     import argparse
     import torch
 
@@ -121,20 +119,23 @@ if __name__ == "__main__":
     parser.add_argument('model_path', type=str, nargs='?', default=None, help='Path to pretrained model')
     parser.add_argument('save_path', type=str, nargs='?', default='self_play_data.pkl', help='Output pickle file')
     parser.add_argument('--simulations', type=int, default=200, help='MCTS simulations per move')
-    parser.add_argument('--device', type=str, default='cpu', choices=['cpu','cuda'], help='Device for model')
     args = parser.parse_args()
+
+    # 自动检测CUDA
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
 
     # 加载模型
     model = None
     if args.model_path:
-        checkpoint = torch.load(args.model_path, map_location=args.device)
+        checkpoint = torch.load(args.model_path, map_location=device)
         from network import YourModelClass
         model = YourModelClass()
         if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
             model.load_state_dict(checkpoint['model_state'])
         else:
             model.load_state_dict(checkpoint)
-        model.to(args.device)
+        model.to(device)
 
     self_play_games(
         model_black=model,

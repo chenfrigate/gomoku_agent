@@ -4,44 +4,9 @@ import random
 import numpy as np
 
 from mcts import MCTS
-from gomoku_game import GomokuGame
+from gomoku_game_headless import GomokuGame
 from replay_buffer import ReplayBuffer
 from network import encode_pov_tensor
-
-# —— 动态给 GomokuGame 添加无头自对弈所需接口 ——
-
-def get_board(self):
-    return self.board
-GomokuGame.get_board = get_board
-
-def get_state_tensor(self, player):
-    return encode_pov_tensor(self.board, player)
-GomokuGame.get_state_tensor = get_state_tensor
-
-def get_legal_moves(self, board):
-    return list(np.where(board.flatten() == 0)[0])
-GomokuGame.get_legal_moves = get_legal_moves
-
-def play(self, action, player):
-    size = self.board.shape[0]
-    y, x = divmod(action, size)
-    self.board[y][x] = player
-GomokuGame.play = play
-
-def get_winner(self):
-    H, W = self.board.shape
-    for y in range(H):
-        for x in range(W):
-            p = self.board[y][x]
-            if p != 0 and self.check_winner(x, y, p):
-                return p
-    return 0
-GomokuGame.get_winner = get_winner
-
-def is_over(self):
-    return (self.get_winner() != 0) or np.all(self.board.flatten() != 0)
-GomokuGame.is_over = is_over
-
 
 def self_play_games(
     model_black=None,

@@ -40,19 +40,20 @@ class GomokuGame:
 
         return True
 
-    def check_win(self, x, y):
-        def count(dx, dy):
-            cnt = 0
-            i, j = x + dx, y + dy
-            while 0 <= i < BOARD_SIZE and 0 <= j < BOARD_SIZE and self.board[i][j] == self.current_player:
-                cnt += 1
-                i += dx
-                j += dy
-            return cnt
-
-        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
+    def check_win(self, x, y, player):
+        directions = [(1,0), (0,1), (1,1), (1,-1)]
         for dx, dy in directions:
-            if count(dx, dy) + count(-dx, -dy) + 1 >= WIN_CONDITION:
+            count = 1
+            for d in [1, -1]:
+                nx, ny = x, y
+                while True:
+                    nx += d * dx
+                    ny += d * dy
+                    if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE and self.board[ny][nx] == player:
+                        count += 1
+                    else:
+                        break
+            if count >= 5:
                 return True
         return False
 
@@ -75,3 +76,32 @@ class GomokuGame:
         clone.game_over = self.game_over
         clone.winner = self.winner
         return clone
+
+
+    # 下面这几行就直接复制粘贴进类里，替换掉打补丁
+    def get_board(self):
+        return self.board
+
+    def get_state_tensor(self, player):
+        from network import encode_pov_tensor
+        return encode_pov_tensor(self.board, player)
+
+    def get_legal_moves(self, board):
+        return list(np.where(board.flatten() == 0)[0])
+
+    def play(self, action, player):
+        size = self.board.shape[0]
+        y, x = divmod(action, size)
+        self.board[y][x] = player
+
+    def get_winner(self):
+        H, W = self.board.shape
+        for y in range(H):
+            for x in range(W):
+                p = self.board[y][x]
+                if p != 0 and self.check_win(x, y, p):
+                    return p
+        return 0
+
+    def is_over(self):
+        return (self.get_winner() != 0) or np.all(self.board.flatten() != 0)

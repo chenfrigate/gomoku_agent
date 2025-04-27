@@ -4,7 +4,7 @@ import random
 import numpy as np
 
 from mcts import MCTS
-from gomoku_game_headless import GomokuGame
+from gomoku_game import GomokuGame
 from replay_buffer import ReplayBuffer
 from network import encode_pov_tensor
 
@@ -87,41 +87,42 @@ def self_play_games(
         current     = 1  # 黑方 +1，白方 -1
 
         while not game.is_over():
+            # 获取当前策略分布
             if current == 1:
                 if mcts_black:
                     policy = mcts_black.search(game.get_board())
                 else:
                     legal = game.get_legal_moves(game.get_board())
-                    policy = np.zeros(size*size)
+                    policy = np.zeros(size*size, dtype=np.float32)
                     for a in legal:
                         policy[a] = 1/len(legal)
-                legal = game.get_legal_moves(game.get_board())
-                probs = policy[legal]
-                if probs.sum() <= 0:
-                    action = random.choice(legal)
-                    pi = [1/len(legal)] * len(legal)
-                else:
-                    probs = probs / probs.sum()
-                    action = np.random.choice(legal, p=probs)
-                    pi = probs.tolist()
             else:
                 if mcts_white:
                     policy = mcts_white.search(game.get_board())
                 else:
                     legal = game.get_legal_moves(game.get_board())
-                    policy = np.zeros(size*size)
+                    policy = np.zeros(size*size, dtype=np.float32)
                     for a in legal:
                         policy[a] = 1/len(legal)
-                legal = game.get_legal_moves(game.get_board())
-                probs = policy[legal]
-                if probs.sum() <= 0:
-                    action = random.choice(legal)
-                    pi = [1/len(legal)] * len(legal)
-                else:
-                    probs = probs / probs.sum()
-                    action = np.random.choice(legal, p=probs)
-                    pi = probs.tolist()
 
+            # 对完整分布归一化，并屏蔽非法走子
+            policy = policy / (policy.sum() + 1e-8)
+            legal = game.get_legal_moves(game.get_board())
+            mask = np.ones_like(policy, dtype=bool)
+            mask[legal] = False
+            policy[mask] = 0
+            policy = policy / (policy.sum() + 1e-8)
+
+            # 按概率采样动作
+            if policy.sum() <= 0:
+                action = random.choice(legal)
+            else:
+                action = np.random.choice(len(policy), p=policy)
+
+            # 保存完整向量
+            pi = policy.tolist()
+
+            # 记录状态与策略
             state = game.get_state_tensor(current)
             state_hist.append(state)
             pi_hist.append(pi)
@@ -139,8 +140,43 @@ def self_play_games(
         if idx % 1 == 0 or idx == num_games:
             print(f"[SelfPlay] Cycle {cycle_index} game {idx}/{num_games} finished. Winner: {winner}")
 
-
-
+    # 保存 ReplayBuffer 对象
     with open(save_path, 'wb') as f:
         pickle.dump(buffer, f)
     print(f"[SelfPlay] Saved {num_games} games to {save_path}")
+
+
+if __name__ == "__main__":
+    # 示例调用：python self_play.py 100 models/pretrained.pth self_play_data.pkl
+    import argparse
+    import torch
+
+    parser = argparse.ArgumentParser(description="Run self-play games to generate training data.")
+    parser.add_argument('num_games', type=int, help='Number of games to play')
+    parser.add_argument('model_path', type=str, nargs='?', default=None, help='Path to pretrained model')
+    parser.add_argument('save_path', type=str, nargs='?', default='self_play_data.pkl', help='Output pickle file')
+    parser.add_argument('--simulations', type=int, default=200, help='MCTS simulations per move')
+    parser.add_argument('--device', type=str, default='cpu', choices=['cpu','cuda'], help='Device for model')
+    args = parser.parse_args()
+
+    # 加载模型
+    model = None
+    if args.model_path:
+        checkpoint = torch.load(args.model_path, map_location=args.device)
+        from network import YourModelClass
+        model = YourModelClass()
+        if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
+            model.load_state_dict(checkpoint['model_state'])
+        else:
+            model.load_state_dict(checkpoint)
+        model.to(args.device)
+
+    self_play_games(
+        model_black=model,
+        model_white=None,
+        num_games=args.num_games,
+        save_path=args.save_path,
+        cycle_index=None,
+        num_simulations=args.simulations,
+        buffer_size=10000
+    )

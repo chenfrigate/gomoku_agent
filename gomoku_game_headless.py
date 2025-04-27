@@ -47,7 +47,7 @@ class GomokuGame:
         directions = [(1,0), (0,1), (1,1), (1,-1)]  # (dr, dc)
         for dr, dc in directions:
             count = 1  # 当前落子点已计数
-            print(f"检查位置: ({row}, {col}), 玩家: {player}")
+            #print(f"检查位置: ({row}, {col}), 玩家: {player}")
             for step in [1, -1]:  # 正反两个方向
                 r, c = row, col
                 while True:
@@ -57,7 +57,7 @@ class GomokuGame:
                         count += 1
                     else:
                         break
-            print(f"方向 {dr}, {dc}: 计数={count}")
+            #print(f"方向 {dr}, {dc}: 计数={count}")
             if count >= WIN_CONDITION:
                 return True
         return False

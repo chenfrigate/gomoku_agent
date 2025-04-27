@@ -1,148 +1,135 @@
 import tkinter as tk
 from tkinter import messagebox
 import numpy as np
+import random
 import torch
 from mcts import MCTS
-from network import encode_pov_tensor
+from gomoku_game_headless import GomokuGame as HeadlessGame  # 引入无头逻辑
 
 BOARD_SIZE = 15
 GRID_SIZE = 40
 PADDING = 20
 
-class GomokuGame:
-    #def __init__(self, model):
-    def __init__(self, model=None):
-        self.debug_net_policy = False
-        self.window = tk.Tk()
-        self.window.title("五子棋 - 智能体对弈")
-
-        canvas_size = PADDING * 2 + GRID_SIZE * (BOARD_SIZE - 1)
-        self.canvas = tk.Canvas(self.window, width=canvas_size, height=canvas_size, bg='burlywood')
-        self.canvas.pack()
-
-        self.canvas.bind("<Button-1>", self.human_move)
-        self.board = np.zeros((BOARD_SIZE, BOARD_SIZE), dtype=int)
-        # Agent 先手，扮演黑棋（1），玩家扮白棋（-1）
-        self.current_player = -1
-
-        # self.model = model
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.mcts = MCTS(self.model, board_size=BOARD_SIZE, n_simulations=1000)
-        # 接收可选的 model；只有传进来才会初始化 MCTS
-        self.model  = model
+class GomokuGameGUI:
+    def __init__(self, model=None,n_simulations=1000):
+        # 初始化无头游戏实例
+        self.game = HeadlessGame()
+        self.model = model
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if self.model is not None:
-            self.mcts = MCTS(self.model, board_size=BOARD_SIZE, n_simulations=1000)
+            self.mcts = MCTS(self.model, board_size=BOARD_SIZE, n_simulations=n_simulations)
         else:
             self.mcts = None
 
+        # GUI 界面
+        self.window = tk.Tk()
+        self.window.title("五子棋 - 智能体对弈")
+        canvas_size = PADDING*2 + GRID_SIZE*(BOARD_SIZE - 1)
+        self.canvas = tk.Canvas(self.window, width=canvas_size, height=canvas_size, bg='burlywood')
+        self.canvas.pack()
+        self.canvas.bind("<Button-1>", self.human_move)
 
         self.draw_board()
-        # 初始化后暂停 500ms，再让 Agent（黑）先下一子
+        # Agent 先手
         self.window.after(500, self.agent_move)
 
     def draw_board(self):
         for i in range(BOARD_SIZE):
-            self.canvas.create_line(PADDING, PADDING + i * GRID_SIZE,
-                                    PADDING + (BOARD_SIZE - 1) * GRID_SIZE, PADDING + i * GRID_SIZE)
-            self.canvas.create_line(PADDING + i * GRID_SIZE, PADDING,
-                                    PADDING + i * GRID_SIZE, PADDING + (BOARD_SIZE - 1) * GRID_SIZE)
+            x0, y0 = PADDING, PADDING + i * GRID_SIZE
+            x1, y1 = PADDING + (BOARD_SIZE-1)*GRID_SIZE, y0
+            self.canvas.create_line(x0, y0, x1, y1)
+            x0, y0 = PADDING + i * GRID_SIZE, PADDING
+            x1, y1 = x0, PADDING + (BOARD_SIZE-1)*GRID_SIZE
+            self.canvas.create_line(x0, y0, x1, y1)
 
     def draw_piece(self, x, y, player):
-        color = "black" if player == 1 else "white"
-        self.canvas.create_oval(
-            PADDING + x * GRID_SIZE - 15, PADDING + y * GRID_SIZE - 15,
-            PADDING + x * GRID_SIZE + 15, PADDING + y * GRID_SIZE + 15,
-            fill=color
-        )
+        color = 'black' if player == 1 else 'white'
+        cx = PADDING + x*GRID_SIZE
+        cy = PADDING + y*GRID_SIZE
+        r = GRID_SIZE//2 - 5
+        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, fill=color)
 
     def human_move(self, event):
-        x = round((event.x - PADDING) / GRID_SIZE)
-        y = round((event.y - PADDING) / GRID_SIZE)
-        if 0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE and self.board[y][x] == 0:
-            # 玩家扮白棋，用 -1 表示
-            self.board[y][x] = -1
-            self.draw_piece(x, y, -1)
-            if self.check_winner(x, y, -1):
-                messagebox.showinfo("游戏结束", "你赢了！")
-                self.window.quit()
+        col = int((event.x - PADDING + GRID_SIZE/2) // GRID_SIZE)
+        row = int((event.y - PADDING + GRID_SIZE/2) // GRID_SIZE)
+        # 调用无头逻辑验证并执行
+        if 0 <= col < BOARD_SIZE and 0 <= row < BOARD_SIZE:
+            ok = self.game.play_move((row, col))  # headless 接口使用 (row,col)
+            if not ok:
                 return
-            self.current_player = -1
-            # 白棋落完，换黑棋（Agent）
+            self.draw_piece(col, row, -1)
+            #self.draw_piece(row,col)
+            # if self.game.check_win(x, y,-1):
+            # 延迟100ms后检查输赢，确保棋子已渲染
+            self.window.after(100, lambda: self.check_winner(row, col, -1))
             self.window.after(500, self.agent_move)
 
     def agent_move(self):
-        x, y = self.get_agent_action()
-        #print(f"i am trying put {x} and {y}")
-        if x is not None:
-            # Agent 扮演黑棋，用 1 表示
-            self.board[y][x] = 1
-            self.draw_piece(x, y, 1)
-            if self.check_winner(x, y, 1):
-                messagebox.showinfo("游戏结束", "智能体赢了！")
-                self.window.quit()
-            # 下完黑，换白棋玩家
-            self.current_player = -1
+        # 1) 先拿到所有合法动作 和 扁平索引
+        legal_moves = self.game.get_legal_actions()            # [(r,c), ...]
+        legal = [r * BOARD_SIZE + c for r, c in legal_moves]   # [flat_idx, ...]
+        board = self.game.get_board_state()
 
-    def get_agent_action(self):
-        if getattr(self, 'debug_net_policy', False):
-            # 1. 先把当前棋盘编码为模型输入 tensor
-            #    假设 self.board 是 shape=(BOARD_SIZE, BOARD_SIZE) 的 numpy 数组，
-            #    self.device + self.net 在 __init__ 里已经设置好了。
-            tensor = encode_pov_tensor(self.board, me=1)      # (C, H, W)
-            tensor = tensor.unsqueeze(0).to(self.device)      # (1, C, H, W)
+        # 2) 如果有模型，用 MCTS 搜索并对输出做掩码；否则给均匀分布
+        if self.mcts:
+            raw_policy = self.mcts.search(board)                # 网络输出的原始概率向量
+            policy = np.zeros_like(raw_policy)
+            policy[legal] = raw_policy[legal]                   # 只保留合法落子概率
+        else:
+            policy = np.zeros(BOARD_SIZE * BOARD_SIZE, dtype=np.float32)
+            policy[legal] = 1.0 / len(legal)
 
-            # 2. 纯前向，不计算梯度
-            with torch.no_grad():
-                policy, _ = self.model(tensor)                  # policy.shape == (1, BOARD_SIZE*BOARD_SIZE)
-            policy = policy.cpu().numpy().flatten()           # (BOARD_SIZE*BOARD_SIZE,)
 
-            # 3. 掩掉已经落子的位置，只在空位里选
-            legal_moves = np.where(self.board.flatten() == 0)[0]  # 空点的 flat 索引列表
-            policy_masked = policy[legal_moves]                  
+        # 掩码并采样
+        # legal 现在是扁平索引列表
+        mask = np.zeros_like(policy, dtype=bool)
+        mask[legal] = True
+        probs = policy * mask
+        if probs.sum() == 0:
+            choice = random.choice(legal)
+        else:
+            probs = probs / probs.sum()
+            choice = np.random.choice(len(probs), p=probs)
 
-            # 4. 如果网络在所有空位上都打了 0（极端情况），就随便下一个防止卡死
-            if policy_masked.sum() == 0:
-                choice = np.random.choice(legal_moves)
-                y, x = divmod(choice, BOARD_SIZE)
-                return x, y
+        # 将 flat index 转为行列
+        row, col = divmod(choice, BOARD_SIZE)
+        # 执行落子
+        self.game.play_move((row, col))
+        self.draw_piece(col, row, 1)
+        print(f"智能体落子: ({row}, {col})")
+        # 检查胜负
+        # 延迟100ms后检查输赢
+        self.window.after(100, lambda: self.check_winner(row, col, 1))
 
-            # 5. 否则选概率最高的位置
-            action = legal_moves[np.argmax(policy_masked)]
-            y, x = divmod(action, BOARD_SIZE)
-            return x, y
 
-        else:# —— 原本 MCTS 走子流程 —— 
-            policy = self.mcts.search(self.board)
-            #print(f"i get a policy,{policy} based on the board of {self.board}")
-            legal_moves = np.where(self.board.flatten() == 0)[0]
-            policy_masked = policy[legal_moves]
-            if policy_masked.sum() == 0:
-                # 随机挑一个合法点，下个棋以免卡死
-                choice = np.random.choice(legal_moves)
-                y, x = divmod(choice, BOARD_SIZE)
-                #return None, None
-                return x,y
-            action = legal_moves[np.argmax(policy_masked)]
-            y, x = divmod(action, BOARD_SIZE)
-            return x, y
-
-    def check_winner(self, x, y, player):
-        directions = [(1,0), (0,1), (1,1), (1,-1)]
-        for dx, dy in directions:
-            count = 1
-            for d in [1, -1]:
-                nx, ny = x, y
-                while True:
-                    nx += d * dx
-                    ny += d * dy
-                    if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE and self.board[ny][nx] == player:
-                        count += 1
-                    else:
-                        break
-            if count >= 5:
-                return True
-        return False
+    def check_winner(self, row, col, player):
+        if self.game.check_win(row, col):
+            winner = "你" if player == -1 else "智能体"
+            messagebox.showinfo("游戏结束", f"{winner}赢了！")
+            self.window.quit()
 
     def run(self):
         self.window.mainloop()
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_path', type=str, default=None)
+    parser.add_argument('--simulations', type=int, default=1000)
+    args = parser.parse_args()
+
+    # 自动检测 CUDA/CPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = None
+    if args.model_path:
+        checkpoint = torch.load(args.model_path, map_location=device)
+        from network import YourModelClass
+        model = YourModelClass()
+        if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
+            model.load_state_dict(checkpoint['model_state'])
+        else:
+            model.load_state_dict(checkpoint)
+        model.to(device)
+
+    gui = GomokuGameGUI(model, n_simulations=args.simulations)
+    gui.run()

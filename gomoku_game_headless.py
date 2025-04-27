@@ -23,37 +23,42 @@ class GomokuGame:
         if self.game_over:
             return False
 
-        x, y = move
-        if self.board[x][y] != 0:
+
+        row, col = move
+        if self.board[row][col] != 0:
             return False
 
-        self.board[x][y] = self.current_player
+        self.board[row][col] = self.current_player
 
-        if self.check_win(x, y,self.current_player):
+        if self.check_win(row, col):
             self.game_over = True
             self.winner = self.current_player
         elif len(self.get_legal_actions()) == 0:
             self.game_over = True  # 平局
             self.winner = 0
         else:
-            self.current_player = 3 - self.current_player  # 1 -> 2, 2 -> 1
+            self.current_player = -self.current_player  # 1 -> -1, -1 -> 1
+
 
         return True
 
-    def check_win(self, x, y, player):
-        directions = [(1,0), (0,1), (1,1), (1,-1)]
-        for dx, dy in directions:
-            count = 1
-            for d in [1, -1]:
-                nx, ny = x, y
+    def check_win(self, row, col):
+        player = self.board[row][col]
+        directions = [(1,0), (0,1), (1,1), (1,-1)]  # (dr, dc)
+        for dr, dc in directions:
+            count = 1  # 当前落子点已计数
+            print(f"检查位置: ({row}, {col}), 玩家: {player}")
+            for step in [1, -1]:  # 正反两个方向
+                r, c = row, col
                 while True:
-                    nx += d * dx
-                    ny += d * dy
-                    if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE and self.board[ny][nx] == player:
+                    r += step * dr
+                    c += step * dc
+                    if 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE and self.board[r][c] == player:
                         count += 1
                     else:
                         break
-            if count >= 5:
+            print(f"方向 {dr}, {dc}: 计数={count}")
+            if count >= WIN_CONDITION:
                 return True
         return False
 
@@ -77,11 +82,6 @@ class GomokuGame:
         clone.winner = self.winner
         return clone
 
-
-    # 下面这几行就直接复制粘贴进类里，替换掉打补丁
-    def get_board(self):
-        return self.board
-
     def get_state_tensor(self, player):
         from network import encode_pov_tensor
         return encode_pov_tensor(self.board, player)
@@ -89,19 +89,21 @@ class GomokuGame:
     def get_legal_moves(self, board):
         return list(np.where(board.flatten() == 0)[0])
 
+    # 在 gomoku_game_headless.py 中修改 play 方法
     def play(self, action, player):
         size = self.board.shape[0]
-        y, x = divmod(action, size)
-        self.board[y][x] = player
-
-    def get_winner(self):
-        H, W = self.board.shape
-        for y in range(H):
-            for x in range(W):
-                p = self.board[y][x]
-                if p != 0 and self.check_win(x, y, p):
-                    return p
-        return 0
-
-    def is_over(self):
-        return (self.get_winner() != 0) or np.all(self.board.flatten() != 0)
+        row, col = divmod(action, size)
+        if self.board[row][col] != 0:
+            return False  # 非法移动
+        
+        self.board[row][col] = player
+        
+        # 检查游戏是否结束
+        if self.check_win(row, col):
+            self.game_over = True
+            self.winner = player
+        elif len(self.get_legal_actions()) == 0:
+            self.game_over = True
+            self.winner = 0
+        
+        return True

@@ -56,7 +56,7 @@ def main():
 
     elif args.mode == 'play':
         print("🎮 Play 模式：加载模型，与智能体对弈…")
-        from gomoku_game import GomokuGame
+        from gomoku_game import GomokuGameGUI
         from network import YourModelClass
 
         if not os.path.exists(args.model_path):
@@ -72,7 +72,7 @@ def main():
         model.load_state_dict(state_dict)
         model.eval()
 
-        game = GomokuGame(model)
+        game = GomokuGameGUI(model)
         game.run()
 
 if __name__ == "__main__":

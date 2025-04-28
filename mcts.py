@@ -13,7 +13,7 @@ class MCTSNode:
         self.prior   = 0.0  # network policy prior
 
 class MCTS:
-    def __init__(self, model, board_size=15, c_puct=1.0, n_simulations=100):
+    def __init__(self, model, board_size=15, c_puct=1.0, n_simulations=1000):
         self.model         = model
         self.board_size    = board_size
         self.c_puct        = c_puct
@@ -21,30 +21,84 @@ class MCTS:
         # assume model.parameters() is non-empty
         self.device        = next(model.parameters()).device
 
-    def search(self, root_state):
+    # def search(self, root_state):
+    #     root = MCTSNode(root_state)
+
+    #     for _ in range(self.n_simulations):
+    #         node  = root
+    #         state = copy.deepcopy(root_state)
+
+    #         # Selection
+    #         while node.children:
+    #             action, node = self.select(node)
+    #             y, x = divmod(action, self.board_size)
+    #             state[y][x] = self.current_player(state)
+
+    #         # Expansion
+    #         if not self.is_terminal(state):
+    #             self.expand(node, state)
+
+    #         # Simulation (use value network)
+    #         value = self.evaluate(state)
+
+    #         # Backpropagation
+    #         self.backpropagate(node, value)
+
+    #     return self.get_policy(root)
+
+
+    def search(self, root_state, batch_size=16):
         root = MCTSNode(root_state)
+        sims_done = 0
 
-        for _ in range(self.n_simulations):
-            node  = root
-            state = copy.deepcopy(root_state)
+        while sims_done < self.n_simulations:
+            # 本批次要做多少模拟
+            this_batch = min(batch_size, self.n_simulations - sims_done)
+            leaves = []   # 本批次的 (node, state, path)
 
-            # Selection
-            while node.children:
-                action, node = self.select(node)
-                y, x = divmod(action, self.board_size)
-                state[y][x] = self.current_player(state)
+            # 1) Selection 阶段：本批次多次 descent
+            for _ in range(this_batch):
+                node  = root
+                state = copy.deepcopy(root_state)
+                path  = []
 
-            # Expansion
-            if not self.is_terminal(state):
-                self.expand(node, state)
+                # 沿树走到一个未 expand 的叶子
+                while node.children:
+                    action, node = self.select(node)
+                    path.append(node)
+                    y, x = divmod(action, self.board_size)
+                    state[y][x] = self.current_player(state)
 
-            # Simulation (use value network)
-            value = self.evaluate(state)
+                leaves.append((node, state, path))
 
-            # Backpropagation
-            self.backpropagate(node, value)
+            # 2) Batch Inference
+            batch_states = torch.stack([
+                torch.from_numpy(self.encode_state(s)).to(self.device)
+                for (_, s, _) in leaves
+            ], dim=0)  # [B, C, H, W]
+            with torch.no_grad():
+                logits, values = self.model(batch_states)
+                pis   = torch.softmax(logits, dim=-1).cpu().numpy()
+                vals  = values.cpu().numpy()
 
+            # 3) Expand + Backpropagate
+            for (node, state, path), pi, v in zip(leaves, pis, vals):
+                # 3.1 Expand
+                if not self.is_terminal(state):
+                    for move in self.get_legal_moves(state):
+                        child = MCTSNode(copy.deepcopy(state), parent=node)
+                        child.prior = max(pi[move], 1e-6)
+                        node.children[move] = child
+
+                # 3.2 Backpropagate：把 v 沿 path 向上累加
+                #    注意要根据信号翻转（-v, +v, -v…）
+                self.backpropagate(node, v)
+
+            sims_done += this_batch
+
+        # 最后收集根节点的访问次数分布
         return self.get_policy(root)
+
 
     def select(self, node):
         """
@@ -64,24 +118,26 @@ class MCTS:
                 best_child  = child
         return best_action, best_child
 
-    def expand(self, node, state):
-        """
-        Expand node with network policy priors.
-        """
-        # 1) network forward to get policy over moves
-        input_state  = self.encode_state(state)
-        input_tensor = torch.FloatTensor(input_state).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            policy, _ = self.model(input_tensor)
-        policy = policy.cpu().numpy().flatten()
+    # def expand(self, node, state):
+    #     """
+    #     Expand node with network policy priors.
+    #     """
+    #     # 1) network forward to get policy over moves
+    #     input_state  = self.encode_state(state)
+    #     input_tensor = torch.FloatTensor(input_state).unsqueeze(0).to(self.device)
+    #     with torch.no_grad():
+    #         policy, _ = self.model(input_tensor)
+    #     policy = policy.cpu().numpy().flatten()
 
-        # 2) create children with priors
-        legal_moves = self.get_legal_moves(state)
-        for move in legal_moves:
-            child = MCTSNode(copy.deepcopy(state), parent=node)
-            # assign a minimal prior if network gives zero
-            child.prior = max(policy[move], 1e-6)
-            node.children[move] = child
+    #     # 2) create children with priors
+    #     legal_moves = self.get_legal_moves(state)
+    #     for move in legal_moves:
+    #         child = MCTSNode(copy.deepcopy(state), parent=node)
+    #         # assign a minimal prior if network gives zero
+    #         child.prior = max(policy[move], 1e-6)
+    #         node.children[move] = child
+
+
 
     def backpropagate(self, node, value):
         """

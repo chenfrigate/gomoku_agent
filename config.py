@@ -15,7 +15,7 @@ PRETRAIN_BATCH     = 128
 # 强化学习循环
 GAMES_PER_CYCLE    = 500
 EPOCHS_PER_CYCLE   = 2
-MCTS_PLAYOUTS      = 800
+MCTS_PLAYOUTS      = 100
 
 # 路径
 EXPERT_DATA_PATH   = "expert_data.pkl"

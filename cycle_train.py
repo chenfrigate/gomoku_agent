@@ -11,14 +11,6 @@ from self_play import self_play_games
 from train import train_agent
 
 
-# def load_model(path, device):
-#     model = YourModelClass().to(device)
-#     if path and os.path.exists(path):
-#         model.load_state_dict(torch.load(path, map_location=device))
-#         print(f"[*] Loaded model weights from {path}")
-#     else:
-#         print(f"[!] No pretrained model found at {path}, initializing randomly.")
-#     return model
 
 def load_model(path, device):
     model = YourModelClass().to(device)
@@ -92,13 +84,13 @@ def cycle_training_loop(
         p_loss, v_loss = train_agent(
             model=black_model,
             epochs=epochs_per_cycle,
-            data_path=save_path,
-            device=device
+            data_path=save_path
         )
         # 保存
         next_model_path = f"models/model_cycle{cycle}.pth"
         os.makedirs(os.path.dirname(next_model_path), exist_ok=True)
-        torch.save(black_model.state_dict(), next_model_path)
+        # torch.save(black_model.state_dict(), next_model_path)
+        torch.save({'model_state': black_model.state_dict()}, next_model_path)
         print(f"💾 模型保存到：{next_model_path}")
         # 动态切换
         if white_strategy in ('expert','latest'):
